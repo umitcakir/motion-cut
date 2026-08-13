@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling>=1.26.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "motion-cut"
+version = "0.1.0"
+description = "Desktop hand gesture controller"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "mediapipe>=0.10.14",
+  "numpy>=1.26.4",
+  "opencv-python>=4.10.0.84",
+  "PySide6>=6.7.2",
+  "pynput>=1.7.7"
+]
+
+[project.scripts]
+motion-cut = "motion_cut.main:main"
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/motion_cut"]

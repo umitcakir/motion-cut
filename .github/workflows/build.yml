@@ -1,0 +1,105 @@
+name: Build Executables
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:          # allow manual trigger from GitHub UI
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: motion-cut-linux
+            archive_cmd: "cp dist/motion-cut motion-cut-linux"
+            archive_name: motion-cut-linux
+
+          - os: windows-latest
+            artifact: motion-cut-windows
+            archive_cmd: "Copy-Item dist\\motion-cut.exe motion-cut-windows.exe"
+            archive_name: motion-cut-windows.exe
+
+          - os: macos-latest
+            artifact: motion-cut-macos
+            archive_cmd: "tar -czf motion-cut-macos.tar.gz -C dist 'Motion Cut.app'"
+            archive_name: motion-cut-macos.tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Download model files (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p data/models
+          curl -L "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task" \
+               -o data/models/hand_landmarker.task
+
+      - name: Download model files (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Force -Path data\models
+          Invoke-WebRequest `
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task" `
+            -OutFile data\models\hand_landmarker.task
+        shell: pwsh
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      # Linux: install Qt / OpenGL system libs required at build time
+      - name: Install system libs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libglib2.0-0 libdbus-1-3 \
+            libxcb-cursor0 libxkbcommon-x11-0
+
+      - name: Build with PyInstaller
+        run: pyinstaller motion_cut.spec --clean --noconfirm
+
+      - name: Package (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: ${{ matrix.archive_cmd }}
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: ${{ matrix.archive_cmd }}
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.archive_name }}
+          retention-days: 30
+
+  # Create a GitHub Release and attach all three archives when a tag is pushed
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
