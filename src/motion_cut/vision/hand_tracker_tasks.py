@@ -1,20 +1,25 @@
 from __future__ import annotations
 
+import sys
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
 
+_IMPORT_ERROR: str = ""
+
 try:
     import mediapipe as mp
     from mediapipe.tasks import python as mp_python
     from mediapipe.tasks.python import vision as mp_vision
-except Exception:  # pragma: no cover - depends on installed mediapipe package
+except Exception:  # pragma: no cover
     mp = None
     mp_python = None
     mp_vision = None
+    _IMPORT_ERROR = traceback.format_exc()
 
 
 @dataclass(slots=True)
@@ -36,7 +41,8 @@ class TasksHandTracker:
         self._last_timestamp_ms = 0
 
         if mp is None or mp_python is None or mp_vision is None:
-            self._error_message = "mediapipe tasks backend is not installed"
+            detail = _IMPORT_ERROR.strip().splitlines()[-1] if _IMPORT_ERROR else ""
+            self._error_message = f"mediapipe import failed: {detail}" if detail else "mediapipe tasks backend is not installed"
             return
 
         if not self._model_path.exists():

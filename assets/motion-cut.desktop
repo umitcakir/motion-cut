@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Motion Cut
+GenericName=Gesture Controller
+Comment=Control your desktop with hand gestures
+Exec=motion-cut
+Icon=motion-cut
+Type=Application
+Categories=Utility;Accessibility;
+Keywords=gesture;hand;camera;controller;
+StartupNotify=true

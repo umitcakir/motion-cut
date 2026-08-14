@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -7,7 +8,9 @@ from motion_cut.storage.models import GestureMapping, GestureTemplate
 
 
 class Repository:
-    def __init__(self, db_path: str = "motion_cut.db") -> None:
+    def __init__(self, db_path: str | None = None) -> None:
+        if db_path is None:
+            db_path = os.environ.get("MOTION_CUT_DB", "motion_cut.db")
         self._db_path = Path(db_path)
 
     def connect(self) -> sqlite3.Connection:

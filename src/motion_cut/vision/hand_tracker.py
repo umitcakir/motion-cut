@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+import sys
 import time
 
 import cv2
@@ -12,6 +14,16 @@ except Exception:  # pragma: no cover - optional runtime dependency behavior
     mp = None
 
 from motion_cut.vision.hand_tracker_tasks import TasksHandTracker
+
+
+def _resolve_asset(relative_path: str) -> str:
+    """Resolve a path relative to sys._MEIPASS when frozen, otherwise use as-is."""
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        candidate = os.path.join(bundle, relative_path)
+        if os.path.isfile(candidate):
+            return candidate
+    return relative_path
 
 
 @dataclass(slots=True)
@@ -37,7 +49,7 @@ class HandTracker:
     ) -> None:
         self._min_detection_confidence = float(min_detection_confidence)
         self._min_tracking_confidence = float(min_tracking_confidence)
-        self._model_path = model_path
+        self._model_path = _resolve_asset(model_path)
         self._mp_hands = None
         self._mp_draw = None
         self._hands = None
@@ -68,7 +80,7 @@ class HandTracker:
             return
 
         tasks_tracker = TasksHandTracker(
-            model_path=model_path,
+            model_path=self._model_path,
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence,
         )

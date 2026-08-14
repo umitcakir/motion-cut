@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -511,42 +513,42 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _make_app_icon() -> QIcon:
-        """Draw a scissors icon for the title bar / taskbar."""
+        """Load the project PNG logo; fall back to a generated icon if missing."""
+        # Resolve assets/motion-cut.png relative to sys._MEIPASS (frozen) or project root
+        candidates = []
+        if hasattr(sys, "_MEIPASS"):
+            candidates.append(os.path.join(sys._MEIPASS, "assets", "motion-cut.png"))
+        # dev: two levels up from this file → project root / assets
+        candidates.append(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "assets", "motion-cut.png")
+        )
+        for path in candidates:
+            norm = os.path.normpath(path)
+            if os.path.isfile(norm):
+                return QIcon(norm)
+        # fallback: generated scissors icon
         import math
         size = 64
         px = QPixmap(size, size)
         px.fill(QColor(0, 0, 0, 0))
         p = QPainter(px)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # dark rounded background
         p.setBrush(QBrush(QColor(30, 30, 40)))
         p.setPen(Qt.PenStyle.NoPen)
         p.drawRoundedRect(0, 0, size, size, 12, 12)
-
         blade = QPen(QColor(220, 200, 80), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        pivot_color = QColor(255, 255, 255)
         cx, cy = size // 2, size // 2
-
         for sign in (1, -1):
-            # each blade: from bottom-left/right toward pivot, continuing to tip
-            x0 = cx - sign * 18
-            y0 = cy + 18
-            x1 = cx + sign * 14
-            y1 = cy - 16
+            x0, y0 = cx - sign * 18, cy + 18
+            x1, y1 = cx + sign * 14, cy - 16
             p.setPen(blade)
             p.drawLine(x0, y0, x1, y1)
-            # handle ring
-            ring_pen = QPen(QColor(220, 200, 80), 2)
-            p.setPen(ring_pen)
+            p.setPen(QPen(QColor(220, 200, 80), 2))
             p.setBrush(QBrush(QColor(0, 0, 0, 0)))
             p.drawEllipse(x0 - 6, y0 - 6, 12, 12)
-
-        # pivot dot
-        p.setBrush(QBrush(pivot_color))
+        p.setBrush(QBrush(QColor(255, 255, 255)))
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(cx - 3, cy - 3, 6, 6)
-
         p.end()
         return QIcon(px)
 
@@ -953,8 +955,6 @@ class MainWindow(QMainWindow):
 
         if old_tracker is not None:
             old_tracker.close()
-
-        self._log("Tracker reconnected after hand left frame", "system")
 
     def _recover_camera_stream(self) -> None:
         now = time.monotonic()
