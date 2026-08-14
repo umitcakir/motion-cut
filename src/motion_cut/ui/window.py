@@ -106,6 +106,10 @@ class MainWindow(QMainWindow):
         self._tracker_recover_after_frames = 30
         self._last_tracker_recover_at = 0.0
         self._tracker_recover_cooldown_seconds = 2.0
+        self._frame_miss_streak = 0
+        self._frame_recover_after_frames = 40
+        self._last_camera_recover_at = 0.0
+        self._camera_recover_cooldown_seconds = 2.0
         self._guide_overlay_enabled = False
         self._camera_feed_enabled = True
         self._last_hand_bbox: tuple[int, int, int, int] | None = None
@@ -386,9 +390,10 @@ class MainWindow(QMainWindow):
         preview_layout = QHBoxLayout(preview_box)
         preview_layout.setSpacing(12)
         self.preview_label = QLabel("Camera is not started")
-        self.preview_label.setMinimumSize(800, 600)
+        self.preview_label.setMinimumSize(320, 220)
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setObjectName("previewLabel")
+        self.preview_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         preview_layout.addWidget(self.preview_label, 1)
 
@@ -403,18 +408,86 @@ class MainWindow(QMainWindow):
         left_scroll.setWidgetResizable(True)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         left_scroll.setWidget(left_panel)
-        left_scroll.setMinimumWidth(340)
+        left_scroll.setMinimumWidth(250)
         left_scroll.setStyleSheet(
             "QScrollArea { border: 1px solid #2a3447; border-radius: 10px; background: #111824; }"
         )
+        left_scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
-        layout.addWidget(left_scroll, 0, 0, 3, 1)
-        layout.addWidget(preview_box, 0, 1, 3, 1)
-        logs_box.setMinimumWidth(320)
-        layout.addWidget(logs_box, 0, 2, 3, 1)
-        layout.setColumnStretch(1, 1)
-        layout.setColumnStretch(2, 0)
-        layout.setRowStretch(0, 1)
+        logs_box.setMinimumWidth(250)
+        logs_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        preview_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        self._main_layout = layout
+        self._left_scroll = left_scroll
+        self._preview_box = preview_box
+        self._logs_box = logs_box
+        self._responsive_layout_mode = ""
+
+        self._apply_responsive_layout()
+
+    def _apply_responsive_layout(self) -> None:
+        width = max(self.width(), self.centralWidget().width())
+
+        if width < 980:
+            mode = "stacked"
+        elif width < 1320:
+            mode = "two_row"
+        else:
+            mode = "three_col"
+
+        if mode == self._responsive_layout_mode:
+            return
+
+        self._responsive_layout_mode = mode
+        layout = self._main_layout
+
+        if mode == "stacked":
+            self._left_scroll.setMinimumWidth(220)
+            self._logs_box.setMinimumWidth(220)
+
+            layout.addWidget(self._left_scroll, 0, 0, 1, 1)
+            layout.addWidget(self._preview_box, 1, 0, 1, 1)
+            layout.addWidget(self._logs_box, 2, 0, 1, 1)
+
+            layout.setColumnStretch(0, 1)
+            layout.setColumnStretch(1, 0)
+            layout.setColumnStretch(2, 0)
+            layout.setRowStretch(0, 0)
+            layout.setRowStretch(1, 1)
+            layout.setRowStretch(2, 1)
+        elif mode == "two_row":
+            self._left_scroll.setMinimumWidth(240)
+            self._logs_box.setMinimumWidth(240)
+
+            layout.addWidget(self._left_scroll, 0, 0, 1, 1)
+            layout.addWidget(self._preview_box, 0, 1, 1, 1)
+            layout.addWidget(self._logs_box, 1, 0, 1, 2)
+
+            layout.setColumnStretch(0, 0)
+            layout.setColumnStretch(1, 1)
+            layout.setColumnStretch(2, 0)
+            layout.setRowStretch(0, 1)
+            layout.setRowStretch(1, 1)
+            layout.setRowStretch(2, 0)
+        else:
+            self._left_scroll.setMinimumWidth(250)
+            self._logs_box.setMinimumWidth(250)
+
+            layout.addWidget(self._left_scroll, 0, 0, 3, 1)
+            layout.addWidget(self._preview_box, 0, 1, 3, 1)
+            layout.addWidget(self._logs_box, 0, 2, 3, 1)
+
+            layout.setColumnStretch(0, 0)
+            layout.setColumnStretch(1, 1)
+            layout.setColumnStretch(2, 0)
+            layout.setRowStretch(0, 1)
+            layout.setRowStretch(1, 0)
+            layout.setRowStretch(2, 0)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._apply_responsive_layout()
 
     @staticmethod
     def _make_app_icon() -> QIcon:
@@ -863,6 +936,25 @@ class MainWindow(QMainWindow):
 
         self._log("Tracker reconnected after hand left frame", "system")
 
+    def _recover_camera_stream(self) -> None:
+        now = time.monotonic()
+        if (now - self._last_camera_recover_at) < self._camera_recover_cooldown_seconds:
+            return
+
+        self._last_camera_recover_at = now
+        try:
+            self._stream.close()
+            self._stream.open()
+            self._frame_miss_streak = 0
+            self.status_label.setText("Status: running")
+            self._log("Camera stream reconnected", "system")
+        except CameraBusyError:
+            self.status_label.setText("Status: camera busy")
+            self._log("Camera busy — waiting for device to be released", "warn")
+        except RuntimeError as exc:
+            self.status_label.setText("Status: camera unavailable")
+            self._log(f"Camera stream error: {exc}", "error")
+
     def _capture_sequence_start_pose(self) -> None:
         self._capture_sequence_pose(which="start")
 
@@ -1259,9 +1351,21 @@ class MainWindow(QMainWindow):
         self._animate_button_feedback(self.delete_mapping_button)
 
     def _tick(self) -> None:
-        source_frame = self._stream.read()
-        if source_frame is None:
+        try:
+            source_frame = self._stream.read()
+        except RuntimeError:
+            self._frame_miss_streak += 1
+            if self._frame_miss_streak >= self._frame_recover_after_frames:
+                self._recover_camera_stream()
             return
+
+        if source_frame is None:
+            self._frame_miss_streak += 1
+            if self._frame_miss_streak >= self._frame_recover_after_frames:
+                self._recover_camera_stream()
+            return
+
+        self._frame_miss_streak = 0
 
         frame = source_frame.copy() if self._camera_feed_enabled else np.zeros_like(source_frame)
 
