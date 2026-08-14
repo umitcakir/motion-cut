@@ -8,9 +8,10 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtGui import QBrush, QColor, QCursor, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QAbstractItemView,
     QCheckBox,
     QComboBox,
@@ -112,6 +113,7 @@ class MainWindow(QMainWindow):
         self._camera_recover_cooldown_seconds = 2.0
         self._guide_overlay_enabled = False
         self._camera_feed_enabled = True
+        self._window_is_minimized = False
         self._last_hand_bbox: tuple[int, int, int, int] | None = None
         self._sequence_templates: dict[str, dict[str, object]] = {}
         self._sequence_armed_until: dict[str, float] = {}
@@ -137,6 +139,10 @@ class MainWindow(QMainWindow):
         self._sequence_end_dirty = False
         self._sequence_tolerance_value = self._SEQUENCE_DEFAULT_TOLERANCE
         self._feedback_animations: list = []
+        self._capture_toast: QFrame | None = None
+        self._capture_toast_close_timer = QTimer(self)
+        self._capture_toast_close_timer.setSingleShot(True)
+        self._capture_toast_close_timer.timeout.connect(self._close_capture_toast)
 
         self._timer = QTimer(self)
         self._timer.setInterval(20)
@@ -488,6 +494,20 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._apply_responsive_layout()
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._window_is_minimized = bool(
+                self.windowState() & Qt.WindowState.WindowMinimized
+            )
+
+    def _is_window_obscured(self) -> bool:
+        # Wayland minimize reporting is unreliable; exposure is the best signal.
+        handle = self.windowHandle()
+        if handle is not None and not handle.isExposed():
+            return True
+        return not self.isVisible() or self._window_is_minimized or self.isMinimized()
 
     @staticmethod
     def _make_app_icon() -> QIcon:
@@ -2206,6 +2226,94 @@ class MainWindow(QMainWindow):
         self._feedback_animations.append(sequence)
         sequence.start()
 
+    def _show_capture_toast(self, message: str) -> None:
+        gesture_text = message.strip()
+        action_text = ""
+        if "->" in message:
+            left, right = message.split("->", 1)
+            gesture_text = left.strip()
+            action_text = right.strip()
+
+        if self._capture_toast_close_timer.isActive():
+            self._capture_toast_close_timer.stop()
+
+        if self._capture_toast is not None:
+            self._capture_toast.close()
+            self._capture_toast.deleteLater()
+            self._capture_toast = None
+
+        toast = QFrame(
+            None,
+            Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint,
+        )
+        toast.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        toast.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
+        toast.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+        shell = QFrame(toast)
+        shell.setStyleSheet(
+            "QFrame {"
+            " background: #09111b;"
+            " border: 1px solid #1f3551;"
+            " border-radius: 14px;"
+            "}"
+            "QLabel#title {"
+            " color: #eef6ff;"
+            " font-size: 11px;"
+            " font-weight: 700;"
+            "}"
+            "QLabel#detail {"
+            " color: #f5f9ff;"
+            " font-size: 14px;"
+            " font-weight: 700;"
+            "}"
+            "QLabel#action {"
+            " color: #dff7ff;"
+            " font-size: 12px;"
+            " font-weight: 600;"
+            "}"
+        )
+
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(14, 10, 14, 10)
+        shell_layout.setSpacing(3)
+
+        title_label = QLabel("Gesture Captured")
+        title_label.setObjectName("title")
+        detail_label = QLabel(gesture_text)
+        detail_label.setObjectName("detail")
+        detail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        shell_layout.addWidget(title_label)
+        shell_layout.addWidget(detail_label)
+
+        if action_text:
+            action_label = QLabel(action_text)
+            action_label.setObjectName("action")
+            action_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            shell_layout.addWidget(action_label)
+
+        root_layout = QVBoxLayout(toast)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.addWidget(shell)
+        toast.adjustSize()
+
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        if screen is not None:
+            rect = screen.availableGeometry()
+            x = rect.x() + (rect.width() - toast.width()) // 2
+            y = rect.y() + (rect.height() - toast.height()) // 2
+            toast.move(x, y)
+
+        toast.show()
+        self._capture_toast = toast
+        self._capture_toast_close_timer.start(1800)
+
+    def _close_capture_toast(self) -> None:
+        if self._capture_toast is not None:
+            self._capture_toast.close()
+            self._capture_toast.deleteLater()
+            self._capture_toast = None
+
     def clear_session_log(self) -> None:
         self.log_list.clear()
 
@@ -2278,6 +2386,9 @@ class MainWindow(QMainWindow):
         self._execute_shortcut(shortcut)
         conf_str = f" ({confidence:.0%})" if is_saved_motion else ""
         self._log(f"{gesture_name}{conf_str}  →  {'+'.join(keys)}", "trigger")
+        if self._is_window_obscured():
+            toast_conf = f" ({confidence:.0%})" if is_saved_motion else ""
+            self._show_capture_toast(f"{gesture_name}{toast_conf} -> {'+'.join(keys)}")
         if self._dispatcher.last_error:
             self._log(f"Shortcut warning: {self._dispatcher.last_error}", "warn")
 
@@ -2477,6 +2588,12 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._timer.stop()
+        if self._capture_toast_close_timer.isActive():
+            self._capture_toast_close_timer.stop()
+        if self._capture_toast is not None:
+            self._capture_toast.close()
+            self._capture_toast.deleteLater()
+            self._capture_toast = None
         self._stream.close()
         self._tracker.close()
         super().closeEvent(event)
