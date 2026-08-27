@@ -104,6 +104,34 @@ cp "$ROOT/assets/motion-cut.png" "$APPDIR/${APP_NAME}.png"
 # AppRun launcher
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/bash
+set -e
+
+ydotoold_pid=""
+if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] && command -v ydotool >/dev/null 2>&1; then
+    if ! pgrep -x ydotoold >/dev/null 2>&1 && command -v ydotoold >/dev/null 2>&1; then
+        ydotoold >/dev/null 2>&1 &
+        ydotoold_pid=$!
+
+        for _ in {1..20}; do
+            if [ -S "${YDOTOOL_SOCKET:-/tmp/.ydotool_socket}" ]; then
+                break
+            fi
+            if ! kill -0 "$ydotoold_pid" 2>/dev/null; then
+                echo "[motion-cut] ydotoold failed to start; shortcuts may not work on Wayland." >&2
+                break
+            fi
+            sleep 0.05
+        done
+    fi
+fi
+
+cleanup() {
+    if [ -n "$ydotoold_pid" ] && kill -0 "$ydotoold_pid" 2>/dev/null; then
+        kill "$ydotoold_pid" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
 exec "$APPDIR/opt/motion-cut/motion-cut" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
