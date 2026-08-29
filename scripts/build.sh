@@ -18,10 +18,19 @@ if [ ! -f "$HAND_MODEL" ]; then
 fi
 
 # ── 2. install build dependencies ────────────────────────────────────────────
-pip install --quiet pyinstaller
+if [ -x "$ROOT/.venv/bin/python" ]; then
+    PYTHON_BIN="$ROOT/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+else
+    echo "Python 3 interpreter not found."
+    exit 1
+fi
+
+"$PYTHON_BIN" -m pip install --quiet -r requirements.txt pyinstaller
 
 # ── 3. build ─────────────────────────────────────────────────────────────────
-pyinstaller motion_cut.spec --clean --noconfirm
+"$PYTHON_BIN" -m PyInstaller motion_cut.spec --clean --noconfirm
 
 echo ""
 echo "Build complete → dist/motion-cut"

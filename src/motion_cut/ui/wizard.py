@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from motion_cut.ui import theme
 from motion_cut.vision.capture import CameraBusyError, CameraStream
 from motion_cut.vision.hand_tracker import HandTracker
 
@@ -53,8 +54,11 @@ SYSTEM_ACTIONS = (
     ("⏯  Play / Pause", "playpause"),
     ("⏭  Next Track", "nexttrack"),
     ("⏮  Previous Track", "prevtrack"),
+    ("⏹  Stop Media", "stop"),
     ("☀  Brightness Up", "brightnessup"),
     ("🌙  Brightness Down", "brightnessdown"),
+    ("▣  Take Screenshot", "screenshot"),
+    ("▣  Lock Screen", "lockscreen"),
 )
 
 # ── shared utilities (minimal duplication to avoid circular imports) ───────────
@@ -121,7 +125,7 @@ def _snapshot_pixmap(
     height: int = 92,
 ) -> QPixmap:
     px = QPixmap(width, height)
-    px.fill(QColor("#101520"))
+    px.fill(QColor(theme.INSET))
     if pose_vector.shape != (21, 3):
         return px
 
@@ -141,18 +145,18 @@ def _snapshot_pixmap(
 
     p = QPainter(px)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(QPen(QColor("#4f6d95"), 2))
+    p.setPen(QPen(QColor(theme.LANDMARK_BONE), 2))
     for a, b in _HAND_CONNECTIONS:
         p.drawLine(int(mapped[a, 0]), int(mapped[a, 1]), int(mapped[b, 0]), int(mapped[b, 1]))
 
     tip_indices = {4, 8, 12, 16, 20}
     for idx in range(21):
         if idx == 0:
-            color, r = QColor("#ffffff"), 4
+            color, r = QColor(theme.LANDMARK_TIP), 4
         elif idx in tip_indices:
-            color, r = QColor("#9de7b8"), 3
+            color, r = QColor(theme.LANDMARK_MID), 3
         else:
-            color, r = QColor("#9ec2ff"), 2
+            color, r = QColor(theme.LANDMARK_BASE), 2
         p.setPen(QPen(color, 1))
         p.setBrush(color)
         p.drawEllipse(int(mapped[idx, 0]) - r, int(mapped[idx, 1]) - r, r * 2, r * 2)
@@ -273,7 +277,8 @@ class _FeedLabel(QLabel):
         self.setFixedSize(w, h)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet(
-            "background:#0e131c; border:1px solid #2a3447; border-radius:10px; color:#6a7a9a;"
+            f"background:{theme.INSET}; border:1px solid {theme.BORDER};"
+            f" border-radius:10px; color:{theme.TEXT_DIM};"
         )
 
 
@@ -283,8 +288,7 @@ class _SnapshotLabel(QLabel):
         self.setFixedSize(w, h)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet(
-            "background:#101520; border:1px solid #2a3447; border-radius:8px;"
-            " color:#8ea2c1; font-size:11px;"
+            f"{theme.snapshot_stylesheet()} font-size:11px;"
         )
 
 
@@ -372,7 +376,7 @@ class RecordMotionWizard(QDialog):
 
         sep = QWidget()
         sep.setFixedHeight(1)
-        sep.setStyleSheet("background:#2a3447;")
+        sep.setStyleSheet(f"background:{theme.BORDER};")
         root.addWidget(sep)
 
         # Page stack
@@ -452,7 +456,7 @@ class RecordMotionWizard(QDialog):
 
         self._btn_cap_start = QPushButton("📸   Capture Start Pose")
         self._btn_cap_start.setObjectName("captureButton")
-        self._btn_cap_start.setFixedHeight(42)
+        self._btn_cap_start.setMinimumHeight(42)
         self._btn_cap_start.setEnabled(False)
         self._btn_cap_start.clicked.connect(self._capture_start)
 
@@ -495,7 +499,7 @@ class RecordMotionWizard(QDialog):
 
         self._btn_cap_mid = QPushButton("📸   Capture Middle Pose")
         self._btn_cap_mid.setObjectName("captureButton")
-        self._btn_cap_mid.setFixedHeight(42)
+        self._btn_cap_mid.setMinimumHeight(42)
         self._btn_cap_mid.setEnabled(False)
         self._btn_cap_mid.clicked.connect(self._capture_mid)
 
@@ -557,7 +561,7 @@ class RecordMotionWizard(QDialog):
 
         self._btn_cap_end = QPushButton("📸   Capture End Pose")
         self._btn_cap_end.setObjectName("captureButton")
-        self._btn_cap_end.setFixedHeight(42)
+        self._btn_cap_end.setMinimumHeight(42)
         self._btn_cap_end.setEnabled(False)
         self._btn_cap_end.clicked.connect(self._capture_end)
 
@@ -608,7 +612,7 @@ class RecordMotionWizard(QDialog):
         self._detection_label = QLabel("Perform the gesture to test…")
         self._detection_label.setObjectName("detectionIdle")
         self._detection_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._detection_label.setFixedHeight(36)
+        self._detection_label.setMinimumHeight(36)
         left.addWidget(self._feed_review)
         left.addWidget(self._detection_label)
         main_row.addLayout(left)
@@ -656,7 +660,7 @@ class RecordMotionWizard(QDialog):
         lay.addWidget(desc)
         self._name_input = QLineEdit()
         self._name_input.setPlaceholderText("e.g.  swipe_left")
-        self._name_input.setFixedHeight(44)
+        self._name_input.setMinimumHeight(44)
         self._name_input.textChanged.connect(self._validate_name)
         lay.addWidget(self._name_input)
         self._name_hint = QLabel("")
@@ -680,13 +684,13 @@ class RecordMotionWizard(QDialog):
         lay.addWidget(desc)
         self._shortcut_edit = QKeySequenceEdit()
         self._shortcut_edit.setMaximumSequenceLength(4)
-        self._shortcut_edit.setFixedHeight(44)
+        self._shortcut_edit.setMinimumHeight(44)
         self._shortcut_edit.keySequenceChanged.connect(self._on_wizard_shortcut_changed)
         lay.addWidget(self._shortcut_edit)
 
         lay.addWidget(QLabel("Or system action"))
         self._system_action_combo = QComboBox()
-        self._system_action_combo.setFixedHeight(38)
+        self._system_action_combo.setMinimumHeight(38)
         self._system_action_combo.addItem("— none —", "")
         for label, payload in SYSTEM_ACTIONS:
             self._system_action_combo.addItem(label, payload)
@@ -1090,118 +1094,4 @@ class RecordMotionWizard(QDialog):
     # ── Theme ──────────────────────────────────────────────────────────────────
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet(
-            """
-            QDialog, QWidget {
-                background: #141821;
-                color: #e8edf7;
-                font-size: 13px;
-            }
-            QLabel#stepDotActive {
-                background: #2374e1;
-                border: 1px solid #2e82f0;
-                border-radius: 6px;
-                color: #ffffff;
-                font-size: 11px;
-                font-weight: 700;
-                padding: 4px 2px;
-            }
-            QLabel#stepDotDone {
-                background: #183520;
-                border: 1px solid #2a6040;
-                border-radius: 6px;
-                color: #60c090;
-                font-size: 11px;
-                padding: 4px 2px;
-            }
-            QLabel#stepDotInactive {
-                background: #1a2130;
-                border: 1px solid #2a3447;
-                border-radius: 6px;
-                color: #6a7a9a;
-                font-size: 11px;
-                padding: 4px 2px;
-            }
-            QLabel#descLabel {
-                color: #c8d4ea;
-                font-size: 13px;
-                padding: 2px 0;
-            }
-            QLabel#statusHint {
-                color: #7a9fc0;
-                font-size: 12px;
-            }
-            QLabel#errorLabel {
-                color: #e05060;
-                font-size: 12px;
-            }
-            QLabel#nameOk {
-                color: #60c090;
-                font-size: 12px;
-            }
-            QLabel#detectionIdle {
-                background: #1a2435;
-                border: 1px solid #2a3a52;
-                border-radius: 8px;
-                color: #7a9fc0;
-                padding: 4px 10px;
-                font-size: 12px;
-            }
-            QLabel#detectionArmed {
-                background: #1e2a18;
-                border: 1px solid #3a5a28;
-                border-radius: 8px;
-                color: #b0e080;
-                padding: 4px 10px;
-                font-size: 12px;
-            }
-            QLabel#detectionHit {
-                background: #183020;
-                border: 1px solid #30b060;
-                border-radius: 8px;
-                color: #60e090;
-                font-weight: 700;
-                padding: 4px 10px;
-                font-size: 13px;
-            }
-            QPushButton {
-                background: #2b3548;
-                border: 1px solid #3b4a63;
-                border-radius: 8px;
-                padding: 7px 14px;
-            }
-            QPushButton:hover { background: #34425a; }
-            QPushButton:disabled {
-                color: #8e9bb1; background: #222a39; border: 1px solid #2b3447;
-            }
-            QPushButton#primaryButton {
-                background: #2374e1; border: 1px solid #2e82f0;
-                color: #f4f9ff; font-weight: 600;
-            }
-            QPushButton#primaryButton:hover { background: #2a84ff; }
-            QPushButton#primaryButton:disabled {
-                background: #222a39; border: 1px solid #2b3447; color: #8e9bb1;
-            }
-            QPushButton#captureButton {
-                background: #1e3a58; border: 1px solid #2a5a88;
-                color: #9ec8ff; font-weight: 600; font-size: 13px;
-            }
-            QPushButton#captureButton:hover { background: #254870; }
-            QPushButton#captureButton:disabled {
-                background: #1a2130; border: 1px solid #2a3447; color: #4a5a6a;
-            }
-            QPushButton#secondaryButton { background: #2c3e55; }
-            QPushButton#cancelButton { background: #2b3548; color: #c8bbb0; }
-            QLineEdit, QKeySequenceEdit, QComboBox {
-                background: #121a27; border: 1px solid #30405a;
-                border-radius: 8px; padding: 6px 10px;
-            }
-            QSlider::groove:horizontal {
-                background: #223047; height: 8px; border-radius: 4px;
-            }
-            QSlider::handle:horizontal {
-                background: #6fb3ff; width: 14px; margin: -4px 0; border-radius: 7px;
-            }
-            QSlider::sub-page:horizontal { background: #2c7be5; border-radius: 4px; }
-            """
-        )
+        self.setStyleSheet(theme.wizard_stylesheet())

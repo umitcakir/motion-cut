@@ -13,10 +13,10 @@ if not exist "data\models\hand_landmarker.task" (
 )
 
 REM ── 2. install build dependencies ────────────────────────────────────────
-pip install --quiet pyinstaller
+python -m pip install --quiet -r requirements.txt pyinstaller
 
 REM ── 3. build ─────────────────────────────────────────────────────────────
-pyinstaller motion_cut.spec --clean --noconfirm
+python -m PyInstaller motion_cut.spec --clean --noconfirm
 
 echo.
 echo Build complete -- dist\motion-cut.exe

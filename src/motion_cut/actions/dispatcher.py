@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import time
 from typing import Iterable
 
@@ -10,6 +11,8 @@ from pynput.keyboard import Controller, Key
 
 
 class ActionDispatcher:
+    _NAMED_ACTIONS = {"lockscreen", "screenshot"}
+
     def __init__(self) -> None:
         self._keyboard = Controller()
         self._session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
@@ -22,6 +25,10 @@ class ActionDispatcher:
             return
 
         self._last_error = ""
+        if len(normalized) == 1 and normalized[0] in self._NAMED_ACTIONS:
+            self._trigger_named_action(normalized[0])
+            return
+
         if self._session_type == "wayland" and self._ydotool:
             self._trigger_with_ydotool(normalized)
             return
@@ -56,6 +63,34 @@ class ActionDispatcher:
             time.sleep(0.01)
         for key in reversed(resolved_modifiers):
             self._keyboard.release(key)
+
+    def _trigger_named_action(self, action: str) -> None:
+        if action == "screenshot":
+            if sys.platform == "darwin":
+                self.trigger_shortcut(["cmd", "shift", "3"])
+            elif sys.platform.startswith("win"):
+                self.trigger_shortcut(["cmd", "shift", "s"])
+            else:
+                self.trigger_shortcut(["printscreen"])
+            return
+
+        if sys.platform == "darwin":
+            command = [
+                "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession",
+                "-suspend",
+            ]
+        elif sys.platform.startswith("win"):
+            command = ["rundll32.exe", "user32.dll,LockWorkStation"]
+        else:
+            command = ["loginctl", "lock-session"]
+
+        try:
+            result = subprocess.run(command, check=False, capture_output=True, text=True)
+        except OSError as exc:
+            self._last_error = f"Could not lock screen: {exc}"
+            return
+        if result.returncode != 0:
+            self._last_error = result.stderr.strip() or "Could not lock screen"
 
     @property
     def last_error(self) -> str:
@@ -120,6 +155,8 @@ class ActionDispatcher:
             "playpause": Key.media_play_pause,
             "nexttrack": Key.media_next,
             "prevtrack": Key.media_previous,
+            "stop": getattr(Key, "media_stop", "media_stop"),
+            "printscreen": Key.print_screen,
         }
         return special.get(normalized, normalized)
 
@@ -165,6 +202,7 @@ class ActionDispatcher:
             "nexttrack": 163,
             "prevtrack": 165,
             "stop": 166,
+            "printscreen": 99,
             "brightnessup": 225,
             "brightnessdown": 224,
         }

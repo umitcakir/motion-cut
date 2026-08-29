@@ -9,6 +9,9 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+dist/
+.build-tools/
+data/models/*.task
 develop-eggs/
 dist/
 downloads/
@@ -202,6 +205,11 @@ cython_debug/
 # .vscode/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
+
+# Local Motion Cut state
+motion_cut.db
+PROJECT_MEMORY.md
+PROJECT_PLAN.md
 
 # Ruff stuff:
 .ruff_cache/

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import ntpath
 import os
 import shutil
 import sys
+from typing import Mapping
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("GLOG_minloglevel", "3")
@@ -29,12 +31,31 @@ def _resolve_seed_db() -> str | None:
     return candidate if os.path.isfile(candidate) else None
 
 
+def _default_user_data_dir(
+    platform_name: str | None = None,
+    env: Mapping[str, str] | None = None,
+    home: str | None = None,
+) -> str:
+    platform_name = platform_name or sys.platform
+    env = env or os.environ
+    home = home or os.path.expanduser("~")
+
+    if platform_name == "darwin":
+        return os.path.join(home, "Library", "Application Support", "motion-cut")
+
+    if platform_name.startswith("win"):
+        base = env.get("APPDATA") or env.get("LOCALAPPDATA")
+        if not base:
+            base = ntpath.join(home, "AppData", "Roaming")
+        return ntpath.join(base, "motion-cut")
+
+    base = env.get("XDG_DATA_HOME", os.path.join(home, ".local", "share"))
+    return os.path.join(base, "motion-cut")
+
+
 def _setup_user_db() -> None:
     """Ensure the user has a writable DB, seeding from the bundle on first run."""
-    user_data = os.path.join(
-        os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
-        "motion-cut",
-    )
+    user_data = _default_user_data_dir()
     os.makedirs(user_data, exist_ok=True)
     user_db = os.path.join(user_data, "motion_cut.db")
 

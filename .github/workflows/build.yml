@@ -2,29 +2,53 @@ name: Build Executables
 
 on:
   push:
+    branches: [main, develop]
     tags: ["v*.*.*"]
-  workflow_dispatch:          # allow manual trigger from GitHub UI
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
 
 jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: PYTHONPATH=src python -m unittest discover -s tests -v
+
   build:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-22.04
             artifact: motion-cut-linux
-            archive_cmd: "cp dist/motion-cut motion-cut-linux"
-            archive_name: motion-cut-linux
+            archive_cmd: "cp dist/motion-cut motion-cut-linux-x86_64"
+            archive_name: motion-cut-linux-x86_64
 
           - os: windows-latest
             artifact: motion-cut-windows
-            archive_cmd: "Copy-Item dist\\motion-cut.exe motion-cut-windows.exe"
-            archive_name: motion-cut-windows.exe
+            archive_cmd: "Copy-Item dist\\motion-cut.exe motion-cut-windows-x86_64.exe"
+            archive_name: motion-cut-windows-x86_64.exe
 
-          - os: macos-latest
+          - os: macos-13
             artifact: motion-cut-macos
-            archive_cmd: "tar -czf motion-cut-macos.tar.gz -C dist 'Motion Cut.app'"
-            archive_name: motion-cut-macos.tar.gz
+            archive_cmd: "tar -czf motion-cut-macos-x86_64.tar.gz -C dist 'Motion Cut.app'"
+            archive_name: motion-cut-macos-x86_64.tar.gz
 
     runs-on: ${{ matrix.os }}
 

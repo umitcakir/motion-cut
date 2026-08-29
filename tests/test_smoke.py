@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import Mock
+from unittest import mock
 
 import numpy as np
 
+from motion_cut.actions.dispatcher import ActionDispatcher
+from motion_cut.config import AppSettings, AppSettingsStore
 from motion_cut.gestures.rule_engine import GesturePrediction
 from motion_cut.ui.window import MainWindow
 
@@ -37,6 +43,46 @@ def _make_hand_landmarks(pose: np.ndarray):
 
 
 class SequenceGestureMatcherTests(unittest.TestCase):
+    def test_screenshot_action_uses_the_macos_shortcut(self) -> None:
+        dispatcher = ActionDispatcher.__new__(ActionDispatcher)
+        dispatcher.trigger_shortcut = Mock()
+
+        with mock.patch("motion_cut.actions.dispatcher.sys.platform", "darwin"):
+            dispatcher._trigger_named_action("screenshot")
+
+        dispatcher.trigger_shortcut.assert_called_once_with(["cmd", "shift", "3"])
+
+    def test_lock_screen_uses_the_windows_command(self) -> None:
+        dispatcher = ActionDispatcher.__new__(ActionDispatcher)
+        dispatcher._last_error = ""
+        result = Mock(returncode=0, stderr="")
+
+        with (
+            mock.patch("motion_cut.actions.dispatcher.sys.platform", "win32"),
+            mock.patch("motion_cut.actions.dispatcher.subprocess.run", return_value=result) as run,
+        ):
+            dispatcher._trigger_named_action("lockscreen")
+
+        run.assert_called_once_with(
+            ["rundll32.exe", "user32.dll,LockWorkStation"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_app_settings_round_trip(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = AppSettingsStore(Path(directory) / "settings.json")
+            expected = AppSettings(
+                window_width=1024,
+                window_height=640,
+                camera_feed_enabled=False,
+            )
+
+            store.save(expected)
+
+            self.assertEqual(store.load(), expected)
+
     def _make_window(self) -> MainWindow:
         window = MainWindow.__new__(MainWindow)
         window._last_tick_at = 1.0
@@ -64,6 +110,33 @@ class SequenceGestureMatcherTests(unittest.TestCase):
 
     def test_smoke(self) -> None:
         self.assertTrue(True)
+
+    def test_selected_gesture_label_identifies_the_active_gesture(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+        window.selected_gesture_label = Mock()
+        window.gesture_editor_container = Mock()
+
+        window._update_selected_gesture_label("next")
+        window._set_gesture_editor_visible(True)
+        window.selected_gesture_label.setText.assert_called_once_with("Editing: next")
+        window.gesture_editor_container.setVisible.assert_called_once_with(True)
+
+    def test_gesture_editor_hides_without_a_selection(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+        window.gesture_editor_container = Mock()
+
+        window._set_gesture_editor_visible(False)
+
+        window.gesture_editor_container.setVisible.assert_called_once_with(False)
+
+    def test_poll_interval_tracks_the_camera_frame_rate(self) -> None:
+        self.assertEqual(MainWindow._poll_interval_ms(30.0), 26)
+        self.assertEqual(MainWindow._poll_interval_ms(60.0), 16)
+        self.assertEqual(MainWindow._poll_interval_ms(15.0), 53)
+
+    def test_poll_interval_clamps_implausible_frame_rates(self) -> None:
+        self.assertEqual(MainWindow._poll_interval_ms(0.0), 80)
+        self.assertEqual(MainWindow._poll_interval_ms(10_000.0), 16)
 
     def test_saved_sequence_points_match_even_with_color_mismatch(self) -> None:
         window = self._make_window()

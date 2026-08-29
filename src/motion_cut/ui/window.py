@@ -39,14 +39,36 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from motion_cut.config import CameraConfig, RuntimeConfig
+from motion_cut.config import AppSettings, AppSettingsStore, CameraConfig, RuntimeConfig
 from motion_cut.actions.dispatcher import ActionDispatcher
 from motion_cut.gestures import motion_matcher
 from motion_cut.gestures.rule_engine import GesturePrediction
 from motion_cut.storage.repository import Repository
+from motion_cut.ui import theme
 from motion_cut.ui.wizard import SYSTEM_ACTIONS
 from motion_cut.vision.capture import CameraBusyError, CameraStream
 from motion_cut.vision.hand_tracker import HandTracker
+
+
+class _ContentSizedScrollArea(QScrollArea):
+    """Reports the content's preferred size so layouts don't clip it needlessly."""
+
+    def sizeHint(self):  # noqa: N802
+        hint = super().sizeHint()
+        content = self.widget()
+        if content is not None:
+            hint.setHeight(content.sizeHint().height() + 2 * self.frameWidth())
+        return hint
+
+    def content_minimum_width(self) -> int:
+        content = self.widget()
+        if content is None:
+            return 0
+        return (
+            content.minimumSizeHint().width()
+            + 2 * self.frameWidth()
+            + self.verticalScrollBar().sizeHint().width()
+        )
 
 
 class MainWindow(QMainWindow):
@@ -74,7 +96,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Motion Cut")
         self.setWindowIcon(self._make_app_icon())
-        self.resize(1200, 760)
+        self._settings_store = AppSettingsStore()
+        self._app_settings = self._settings_store.load()
+        self.resize(
+            self._app_settings.window_width,
+            self._app_settings.window_height,
+        )
 
         runtime_cfg = RuntimeConfig()
         camera_cfg = CameraConfig()
@@ -151,6 +178,7 @@ class MainWindow(QMainWindow):
         self._timer.timeout.connect(self._tick)
 
         self._build_ui()
+        self._restore_app_settings()
         self._refresh_gesture_options()
         self._reload_mappings()
         if not self._tracker.is_available:
@@ -169,7 +197,7 @@ class MainWindow(QMainWindow):
 
         control_box = QGroupBox()
         control_layout = QVBoxLayout(control_box)
-        control_layout.setSpacing(10)
+        control_layout.setSpacing(7)
 
         self.start_button = QPushButton("Start Camera")
         self.stop_button = QPushButton("Stop Camera")
@@ -204,7 +232,7 @@ class MainWindow(QMainWindow):
 
         self.record_motion_button = QPushButton("✚  Record New Motion")
         self.record_motion_button.setObjectName("recordButton")
-        self.record_motion_button.setFixedHeight(40)
+        self.record_motion_button.setMinimumHeight(40)
         self.record_motion_button.setToolTip(
             "Open the wizard to record a new start→end pose gesture."
         )
@@ -217,15 +245,22 @@ class MainWindow(QMainWindow):
 
         self.manage_gestures_button = QPushButton("⚙️  Manage Gestures")
         self.manage_gestures_button.setObjectName("secondaryButton")
-        self.manage_gestures_button.setFixedHeight(38)
+        self.manage_gestures_button.setMinimumHeight(38)
         self.manage_gestures_button.clicked.connect(self._open_gesture_manager)
         control_layout.addWidget(self.manage_gestures_button)
 
-        mapping_box = QGroupBox()
+        mapping_box = QGroupBox("Gesture Manager")
+        mapping_box.setObjectName("gestureManagerBox")
         mapping_layout = QVBoxLayout(mapping_box)
-        mapping_layout.setSpacing(10)
+        mapping_layout.setSpacing(12)
 
         self.mapping_gesture_combo = QComboBox()
+        self.mapping_gesture_combo.setPlaceholderText("Choose a saved gesture")
+        self.selected_gesture_label = QLabel("No gesture selected")
+        self.selected_gesture_label.setObjectName("selectedGestureLabel")
+        self.selected_gesture_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         self.mapping_shortcut_capture = QKeySequenceEdit()
         self.mapping_shortcut_capture.setMaximumSequenceLength(4)
         self.mapping_gesture_combo.currentTextChanged.connect(
@@ -261,9 +296,18 @@ class MainWindow(QMainWindow):
         self.mapping_list = QListWidget()
         self.mapping_list.setToolTip("Saved gesture -> shortcut mappings")
 
-        sequence_box = QGroupBox()
+        action_box = QFrame()
+        action_box.setObjectName("gestureActionBox")
+        action_layout = QVBoxLayout(action_box)
+        action_layout.setContentsMargins(12, 10, 12, 12)
+        action_layout.setSpacing(8)
+        action_title = QLabel("Assigned action")
+        action_title.setObjectName("sectionTitle")
+
+        sequence_box = QGroupBox("Gesture Sequence")
+        sequence_box.setObjectName("gestureSequenceBox")
         sequence_layout = QVBoxLayout(sequence_box)
-        sequence_layout.setSpacing(6)
+        sequence_layout.setSpacing(8)
 
         self.sequence_name_input = QLineEdit()
         self.sequence_name_input.setPlaceholderText("test")
@@ -292,7 +336,7 @@ class MainWindow(QMainWindow):
         self.sequence_start_label.setObjectName("hintLabel")
         self.sequence_mid_label.setObjectName("hintLabel")
         self.sequence_end_label.setObjectName("hintLabel")
-        _snap_style = "background: #101520; border: 1px solid #2a3447; border-radius: 8px; color: #8ea2c1;"
+        _snap_style = theme.snapshot_stylesheet()
         self.sequence_start_preview_label = QLabel("No start snapshot")
         self.sequence_mid_preview_label = QLabel("No mid snapshot")
         self.sequence_end_preview_label = QLabel("No end snapshot")
@@ -347,20 +391,33 @@ class MainWindow(QMainWindow):
         sequence_layout.addWidget(self.sequence_hold_repeat_checkbox)
         sequence_layout.addWidget(self.save_sequence_button)
 
-        mapping_layout.addWidget(QLabel("Gesture"))
+        self.gesture_editor_container = QWidget()
+        editor_layout = QVBoxLayout(self.gesture_editor_container)
+        editor_layout.setContentsMargins(0, 0, 0, 0)
+        editor_layout.setSpacing(12)
+
+        mapping_layout.addWidget(QLabel("Selected gesture"))
         mapping_layout.addWidget(self.mapping_gesture_combo)
-        mapping_layout.addWidget(QLabel("Shortcut (press keys)"))
-        mapping_layout.addWidget(self.mapping_shortcut_capture)
-        mapping_layout.addWidget(QLabel("Or system action"))
-        mapping_layout.addWidget(self.system_action_combo)
-        mapping_layout.addLayout(mapping_button_row)
-        mapping_layout.addWidget(sequence_box)
+        action_layout.addWidget(action_title)
+        action_layout.addWidget(QLabel("Shortcut (press keys)"))
+        action_layout.addWidget(self.mapping_shortcut_capture)
+        action_layout.addWidget(QLabel("Or system action"))
+        action_layout.addWidget(self.system_action_combo)
+        action_layout.addLayout(mapping_button_row)
+        editor_layout.addWidget(self.selected_gesture_label)
+        editor_layout.addWidget(action_box)
+        editor_layout.addWidget(sequence_box)
+        mapping_layout.addWidget(self.gesture_editor_container)
+        self._set_gesture_editor_visible(False)
 
         # Gesture manager lives in a separate window so it doesn't crowd the main panel.
         self._gesture_manager = QDialog(self)
         self._gesture_manager.setWindowTitle("Gesture Manager")
         self._gesture_manager.setModal(False)
-        self._gesture_manager.resize(780, 700)
+        self._gesture_manager.resize(
+            self._app_settings.gesture_manager_width,
+            self._app_settings.gesture_manager_height,
+        )
         gm_root = QVBoxLayout(self._gesture_manager)
         gm_root.setContentsMargins(12, 12, 12, 12)
         gm_scroll = QScrollArea()
@@ -412,14 +469,12 @@ class MainWindow(QMainWindow):
         left_panel_layout.addWidget(control_box)
         left_panel_layout.addStretch(1)
 
-        left_scroll = QScrollArea()
+        left_scroll = _ContentSizedScrollArea()
         left_scroll.setWidgetResizable(True)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         left_scroll.setWidget(left_panel)
         left_scroll.setMinimumWidth(250)
-        left_scroll.setStyleSheet(
-            "QScrollArea { border: 1px solid #2a3447; border-radius: 10px; background: #111824; }"
-        )
+        left_scroll.setStyleSheet(theme.panel_stylesheet())
         left_scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
         logs_box.setMinimumWidth(250)
@@ -432,6 +487,11 @@ class MainWindow(QMainWindow):
         self._logs_box = logs_box
         self._responsive_layout_mode = ""
 
+        self._apply_responsive_layout()
+        QTimer.singleShot(0, self._refresh_responsive_layout)
+
+    def _refresh_responsive_layout(self) -> None:
+        self._responsive_layout_mode = ""
         self._apply_responsive_layout()
 
     def _apply_responsive_layout(self) -> None:
@@ -451,7 +511,6 @@ class MainWindow(QMainWindow):
         layout = self._main_layout
 
         if mode == "stacked":
-            self._left_scroll.setMinimumWidth(220)
             self._logs_box.setMinimumWidth(220)
 
             layout.addWidget(self._left_scroll, 0, 0, 1, 1)
@@ -465,7 +524,6 @@ class MainWindow(QMainWindow):
             layout.setRowStretch(1, 1)
             layout.setRowStretch(2, 1)
         elif mode == "two_row":
-            self._left_scroll.setMinimumWidth(240)
             self._logs_box.setMinimumWidth(240)
 
             layout.addWidget(self._left_scroll, 0, 0, 1, 1)
@@ -479,7 +537,6 @@ class MainWindow(QMainWindow):
             layout.setRowStretch(1, 1)
             layout.setRowStretch(2, 0)
         else:
-            self._left_scroll.setMinimumWidth(250)
             self._logs_box.setMinimumWidth(250)
 
             layout.addWidget(self._left_scroll, 0, 0, 3, 1)
@@ -492,6 +549,9 @@ class MainWindow(QMainWindow):
             layout.setRowStretch(0, 1)
             layout.setRowStretch(1, 0)
             layout.setRowStretch(2, 0)
+
+        self._left_scroll.setMinimumWidth(self._left_scroll.content_minimum_width())
+
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -647,213 +707,7 @@ class MainWindow(QMainWindow):
         return pixmap
 
     def _apply_modern_theme(self) -> None:
-        self.setStyleSheet(
-            """
-            QWidget {
-                background: #141821;
-                color: #e8edf7;
-                font-size: 13px;
-            }
-
-            QGroupBox {
-                border: 1px solid #2a3447;
-                border-radius: 10px;
-                padding: 10px;
-                background: #1a2130;
-            }
-
-            QLabel#statusLabel {
-                background: #101520;
-                border: 1px solid #283246;
-                border-radius: 8px;
-                padding: 7px 9px;
-            }
-
-            QLabel#hintLabel {
-                color: #b7c2d8;
-            }
-
-            QLabel#previewLabel {
-                background: #0e131c;
-                color: #95a3bf;
-                border: 1px solid #2a3447;
-                border-radius: 10px;
-            }
-
-            QPushButton {
-                background: #2b3548;
-                border: 1px solid #3b4a63;
-                border-radius: 8px;
-                padding: 7px 11px;
-            }
-
-            QPushButton:hover {
-                background: #34425a;
-            }
-
-            QPushButton:disabled {
-                color: #8e9bb1;
-                background: #222a39;
-                border: 1px solid #2b3447;
-            }
-
-            QPushButton#primaryButton {
-                background: #2374e1;
-                border: 1px solid #2e82f0;
-                color: #f4f9ff;
-                font-weight: 600;
-            }
-
-            QPushButton#primaryButton:hover {
-                background: #2a84ff;
-            }
-
-            QPushButton#primaryButton:disabled {
-                background: #222a39;
-                border: 1px solid #2b3447;
-                color: #8e9bb1;
-            }
-
-            QPushButton#secondaryButton {
-                background: #2c3e55;
-            }
-
-            QPushButton#secondaryButton:disabled {
-                background: #222a39;
-                border: 1px solid #2b3447;
-                color: #8e9bb1;
-            }
-
-            QPushButton#warningButton {
-                background: #7a5a1f;
-                border: 1px solid #926a1f;
-                color: #fff7e5;
-            }
-
-            QPushButton#warningButton:hover {
-                background: #8b6723;
-            }
-
-            QPushButton#warningButton:disabled {
-                background: #222a39;
-                border: 1px solid #2b3447;
-                color: #8e9bb1;
-            }
-
-            QPushButton#dangerButton {
-                background: #7a2630;
-                border: 1px solid #94313f;
-                color: #fff0f2;
-            }
-
-            QPushButton#dangerButton:hover {
-                background: #8d2d39;
-            }
-
-            QPushButton#dangerButton:disabled {
-                background: #222a39;
-                border: 1px solid #2b3447;
-                color: #8e9bb1;
-            }
-
-            QPushButton#recordButton {
-                background: #1e3a58;
-                border: 1px solid #2a5a88;
-                color: #9ec8ff;
-                font-weight: 700;
-                font-size: 13px;
-            }
-
-            QPushButton#recordButton:hover {
-                background: #254870;
-                border: 1px solid #3a7ac0;
-                color: #cce4ff;
-            }
-
-            QLineEdit, QComboBox, QKeySequenceEdit {
-                background: #121a27;
-                border: 1px solid #30405a;
-                border-radius: 8px;
-                padding: 6px 8px;
-            }
-
-            QSlider::groove:horizontal {
-                background: #223047;
-                border: 1px solid #2f4361;
-                height: 8px;
-                border-radius: 4px;
-            }
-
-            QSlider::handle:horizontal {
-                background: #6fb3ff;
-                border: 1px solid #9acbff;
-                width: 14px;
-                margin: -4px 0;
-                border-radius: 7px;
-            }
-
-            QSlider::sub-page:horizontal {
-                background: #2c7be5;
-                border-radius: 4px;
-            }
-
-            QSlider::add-page:horizontal {
-                background: #1b2638;
-                border-radius: 4px;
-            }
-
-            QScrollBar:vertical {
-                background: #151e2c;
-                width: 12px;
-                margin: 2px;
-                border-radius: 6px;
-            }
-
-            QScrollBar::handle:vertical {
-                background: #4f6d95;
-                min-height: 28px;
-                border-radius: 6px;
-                border: 1px solid #6f8db5;
-            }
-
-            QScrollBar::handle:vertical:hover {
-                background: #6b8db8;
-            }
-
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                background: #223047;
-                height: 12px;
-                border-radius: 4px;
-                border: 1px solid #2f4361;
-            }
-
-            QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
-                width: 7px;
-                height: 7px;
-                background: #9ec2ff;
-            }
-
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: transparent;
-            }
-
-            QListWidget {
-                background: #111824;
-                border: 1px solid #2a3447;
-                border-radius: 8px;
-                padding: 4px;
-            }
-
-            QListWidget::item {
-                padding: 4px 6px;
-                border-radius: 6px;
-            }
-
-            QListWidget::item:selected {
-                background: #2a4a7e;
-            }
-            """
-        )
+        self.setStyleSheet(theme.main_window_stylesheet())
 
     def _open_gesture_manager(self) -> None:
         self._gesture_manager.setStyleSheet(self.styleSheet())
@@ -902,6 +756,12 @@ class MainWindow(QMainWindow):
             "success",
         )
 
+    @staticmethod
+    def _poll_interval_ms(frame_rate: float) -> int:
+        """Poll slightly ahead of the camera so frames are never left waiting."""
+        period_ms = 1000.0 / min(max(frame_rate, 10.0), 240.0)
+        return int(max(16.0, period_ms * 0.8))
+
     def start_camera(self) -> None:
         try:
             self._stream.open()
@@ -921,6 +781,7 @@ class MainWindow(QMainWindow):
             return
 
         self._tracker.reset_runtime()
+        self._timer.setInterval(self._poll_interval_ms(self._stream.frame_rate))
         self._timer.start()
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
@@ -1066,7 +927,7 @@ class MainWindow(QMainWindow):
         width = 220
         height = 92
         pixmap = QPixmap(width, height)
-        pixmap.fill(QColor("#101520"))
+        pixmap.fill(QColor(theme.INSET))
 
         if pose_vector.shape != (21, 3):
             return pixmap
@@ -1081,7 +942,7 @@ class MainWindow(QMainWindow):
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        bone_pen = QPen(QColor("#4f6d95"), 2)
+        bone_pen = QPen(QColor(theme.LANDMARK_BONE), 2)
         painter.setPen(bone_pen)
         for a, b in self._HAND_CONNECTIONS:
             painter.drawLine(
@@ -1113,13 +974,13 @@ class MainWindow(QMainWindow):
                 color = signature_colors[idx]
                 radius = 4 if idx == 0 else 3
             elif idx == 0:
-                color = QColor("#ffffff")
+                color = QColor(theme.LANDMARK_TIP)
                 radius = 4
             elif idx in tip_indices:
-                color = QColor("#9de7b8")
+                color = QColor(theme.LANDMARK_MID)
                 radius = 3
             else:
-                color = QColor("#9ec2ff")
+                color = QColor(theme.LANDMARK_BASE)
                 radius = 2
 
             painter.setPen(QPen(color, 1))
@@ -2018,6 +1879,20 @@ class MainWindow(QMainWindow):
             "Camera Feed: On" if checked else "Camera Feed: Off"
         )
 
+    def _restore_app_settings(self) -> None:
+        self.camera_feed_button.setChecked(self._app_settings.camera_feed_enabled)
+
+    def _save_app_settings(self) -> None:
+        self._settings_store.save(
+            AppSettings(
+                window_width=self.width(),
+                window_height=self.height(),
+                gesture_manager_width=self._gesture_manager.width(),
+                gesture_manager_height=self._gesture_manager.height(),
+                camera_feed_enabled=self._camera_feed_enabled,
+            )
+        )
+
     def _crop_to_hand(self, frame, hand_landmarks) -> np.ndarray:
         h, w = frame.shape[:2]
         points = hand_landmarks.landmark
@@ -2148,6 +2023,9 @@ class MainWindow(QMainWindow):
         return draw
 
     def _draw_frame(self, bgr_frame) -> None:
+        if self._is_window_obscured():
+            return
+
         rgb_frame = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
         height, width, channels = rgb_frame.shape
         bytes_per_line = channels * width
@@ -2163,18 +2041,18 @@ class MainWindow(QMainWindow):
             self.preview_label.width(),
             self.preview_label.height(),
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.FastTransformation,
+            Qt.TransformationMode.SmoothTransformation,
         )
         self.preview_label.setPixmap(pixmap)
 
     _LOG_MAX_ROWS = 500
     _LOG_STYLES: dict[str, tuple[str, str]] = {
-        "info":    ("●", "#b0bcd4"),
-        "success": ("✔", "#5ad08a"),
-        "trigger": ("⚡", "#4fc8ef"),
-        "warn":    ("⚠", "#e8b84b"),
-        "error":   ("✗", "#e05060"),
-        "system":  ("◈", "#9a9fe0"),
+        "info":    ("●", theme.TEXT_MUTED),
+        "success": ("✔", theme.SUCCESS),
+        "trigger": ("⚡", theme.INFO),
+        "warn":    ("⚠", theme.WARNING),
+        "error":   ("✗", theme.DANGER),
+        "system":  ("◈", theme.SYSTEM),
     }
 
     def _log(self, message: str, level: str = "info") -> None:
@@ -2253,22 +2131,22 @@ class MainWindow(QMainWindow):
         shell = QFrame(toast)
         shell.setStyleSheet(
             "QFrame {"
-            " background: #09111b;"
-            " border: 1px solid #1f3551;"
+            f" background: {theme.SURFACE};"
+            f" border: 1px solid {theme.BORDER_STRONG};"
             " border-radius: 14px;"
             "}"
             "QLabel#title {"
-            " color: #eef6ff;"
+            f" color: {theme.TEXT_MUTED};"
             " font-size: 11px;"
             " font-weight: 700;"
             "}"
             "QLabel#detail {"
-            " color: #f5f9ff;"
+            f" color: {theme.TEXT};"
             " font-size: 14px;"
             " font-weight: 700;"
             "}"
             "QLabel#action {"
-            " color: #dff7ff;"
+            f" color: {theme.INFO};"
             " font-size: 12px;"
             " font-weight: 600;"
             "}"
@@ -2328,6 +2206,8 @@ class MainWindow(QMainWindow):
 
         if current and current in names:
             self.mapping_gesture_combo.setCurrentText(current)
+        else:
+            self.mapping_gesture_combo.setCurrentIndex(-1)
 
         self._load_sequence_templates()
 
@@ -2427,6 +2307,8 @@ class MainWindow(QMainWindow):
 
     def _on_mapping_selection_changed(self, gesture_name: str) -> None:
         selected_name = gesture_name.strip()
+        self._update_selected_gesture_label(selected_name)
+        self._set_gesture_editor_visible(bool(selected_name))
         shortcut = self._shortcut_mappings.get(selected_name, "")
 
         system_index = self.system_action_combo.findData(shortcut) if shortcut else 0
@@ -2439,6 +2321,15 @@ class MainWindow(QMainWindow):
             QKeySequence() if system_index > 0 else QKeySequence(shortcut)
         )
         self._load_sequence_snapshots_for_selection(selected_name)
+
+    def _update_selected_gesture_label(self, gesture_name: str) -> None:
+        if gesture_name:
+            self.selected_gesture_label.setText(f"Editing: {gesture_name}")
+        else:
+            self.selected_gesture_label.setText("No gesture selected")
+
+    def _set_gesture_editor_visible(self, visible: bool) -> None:
+        self.gesture_editor_container.setVisible(visible)
 
     def _on_system_action_changed(self, index: int) -> None:
         if index > 0:
@@ -2587,6 +2478,7 @@ class MainWindow(QMainWindow):
         return "+".join(normalized)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self._save_app_settings()
         self._timer.stop()
         if self._capture_toast_close_timer.isActive():
             self._capture_toast_close_timer.stop()

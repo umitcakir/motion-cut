@@ -8,9 +8,7 @@ ROOT="$SCRIPT_DIR/.."
 cd "$ROOT"
 
 APP_NAME="motion-cut"
-APP_VERSION="$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")"
 ARCH="$(uname -m)"
-APPIMAGE_OUT="dist/${APP_NAME}-${APP_VERSION}-${ARCH}.AppImage"
 
 # ── 1. Ensure model files are present ────────────────────────────────────────
 MODEL_DIR="data/models"
@@ -23,18 +21,24 @@ if [ ! -f "$HAND_MODEL" ]; then
 fi
 
 # ── 2. Install build dependencies ────────────────────────────────────────────
-pip install --quiet pyinstaller
-
-# ── 2b. Refresh the bundled gesture seed from the live DB (if present) ───────
-if [ -f "$ROOT/motion_cut.db" ]; then
-    cp "$ROOT/motion_cut.db" "$ROOT/data/seed_gestures.db"
-    echo "Gesture seed updated from motion_cut.db"
+if [ -x "$ROOT/.venv/bin/python" ]; then
+    PYTHON_BIN="$ROOT/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+else
+    echo "Python 3 interpreter not found."
+    exit 1
 fi
+
+APP_VERSION="$("$PYTHON_BIN" -c "import tomllib; d=tomllib.load(open('pyproject.toml', 'rb')); print(d['project']['version'])")"
+APPIMAGE_OUT="dist/${APP_NAME}-${APP_VERSION}-${ARCH}.AppImage"
+
+"$PYTHON_BIN" -m pip install --quiet -r requirements.txt pyinstaller
 
 # ── 3. Build onedir bundle with PyInstaller ───────────────────────────────────
 # Remove any prior build artifact that would block COLLECT creating a fresh directory
 rm -rf "$ROOT/dist/motion-cut"
-pyinstaller motion_cut_appimage.spec --clean --noconfirm
+"$PYTHON_BIN" -m PyInstaller motion_cut_appimage.spec --clean --noconfirm
 echo "PyInstaller build complete → dist/${APP_NAME}/"
 
 # ── 4. Generate a placeholder icon if none exists ────────────────────────────

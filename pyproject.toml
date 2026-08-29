@@ -8,16 +8,35 @@ version = "0.1.0"
 description = "Desktop hand gesture controller"
 readme = "README.md"
 requires-python = ">=3.10"
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
+keywords = ["accessibility", "camera", "gestures", "mediapipe", "shortcuts"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: X11 Applications :: Qt",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Desktop Environment",
+]
 dependencies = [
   "mediapipe>=0.10.14",
   "numpy>=1.26.4",
   "opencv-python>=4.10.0.84",
   "PySide6>=6.7.2",
-  "pynput>=1.7.7"
+  "pynput>=1.7.7",
+  "pyobjc-framework-AVFoundation>=10.0; sys_platform == 'darwin'"
 ]
 
 [project.scripts]
 motion-cut = "motion_cut.main:main"
+
+[project.urls]
+Homepage = "https://github.com/umitcakir/motion-cut"
+Issues = "https://github.com/umitcakir/motion-cut/issues"
 
 [project.optional-dependencies]
 build = ["pyinstaller>=6.0"]
