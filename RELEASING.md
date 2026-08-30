@@ -28,7 +28,7 @@ Wait for the **Build Executables** workflow to finish. It uploads these release 
 - `motion-cut-windows-x86_64.exe`
 - `motion-cut-macos-x86_64.tar.gz`
 
-The release is created automatically for version tags. Before announcing it, download and smoke-test each artifact on its target platform when possible.
+The release is created automatically for version tags. Publishing a GitHub Release that targets `main` also runs the build and attaches the same assets to that release. Before announcing it, download and smoke-test each artifact on its target platform when possible.
 
 ## Signing
 
