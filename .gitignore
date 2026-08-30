@@ -34,6 +34,8 @@ MANIFEST
 #   before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+!motion_cut.spec
+!motion_cut_appimage.spec
 
 # Installer logs
 pip-log.txt
