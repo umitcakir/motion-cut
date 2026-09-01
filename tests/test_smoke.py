@@ -12,6 +12,7 @@ from motion_cut.actions.dispatcher import ActionDispatcher
 from motion_cut.config import AppSettings, AppSettingsStore
 from motion_cut.gestures.rule_engine import GesturePrediction
 from motion_cut.ui.window import MainWindow
+from motion_cut.vision.hand_tracker import _prepare_frame_for_hand_detection
 
 
 def _make_pose(variant: str) -> np.ndarray:
@@ -43,6 +44,19 @@ def _make_hand_landmarks(pose: np.ndarray):
 
 
 class SequenceGestureMatcherTests(unittest.TestCase):
+    def test_low_light_frames_are_enhanced_for_hand_detection(self) -> None:
+        frame = np.full((32, 32, 3), 30, dtype=np.uint8)
+
+        enhanced = _prepare_frame_for_hand_detection(frame)
+
+        self.assertGreater(float(enhanced.mean()), float(frame.mean()))
+        self.assertTrue(np.array_equal(frame, np.full((32, 32, 3), 30, dtype=np.uint8)))
+
+    def test_well_lit_frames_are_not_modified_for_hand_detection(self) -> None:
+        frame = np.full((32, 32, 3), 140, dtype=np.uint8)
+
+        self.assertIs(_prepare_frame_for_hand_detection(frame), frame)
+
     def test_play_pause_targets_the_player_that_is_playing(self) -> None:
         dispatcher = ActionDispatcher.__new__(ActionDispatcher)
         dispatcher._playerctl = "/usr/bin/playerctl"

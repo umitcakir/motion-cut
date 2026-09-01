@@ -26,6 +26,25 @@ def _resolve_asset(relative_path: str) -> str:
     return relative_path
 
 
+def _prepare_frame_for_hand_detection(bgr_frame: np.ndarray) -> np.ndarray:
+    """Improve dim frames for inference without changing the camera preview."""
+    luminance = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
+    if float(luminance.mean()) >= 85.0:
+        return bgr_frame
+
+    gamma_table = np.array(
+        [((value / 255.0) ** 0.65) * 255.0 for value in range(256)],
+        dtype=np.uint8,
+    )
+    brightened = cv2.LUT(bgr_frame, gamma_table)
+    lab_frame = cv2.cvtColor(brightened, cv2.COLOR_BGR2LAB)
+    lightness, channel_a, channel_b = cv2.split(lab_frame)
+    enhanced_lightness = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(lightness)
+    return cv2.cvtColor(
+        cv2.merge((enhanced_lightness, channel_a, channel_b)), cv2.COLOR_LAB2BGR
+    )
+
+
 @dataclass(slots=True)
 class TrackingResult:
     landmarks: list
@@ -149,8 +168,9 @@ class HandTracker:
         if self._hands is None:
             return TrackingResult(landmarks=[])
 
+        detection_frame = _prepare_frame_for_hand_detection(bgr_frame)
         if self._backend == "tasks":
-            result = self._hands.process(bgr_frame)
+            result = self._hands.process(detection_frame)
             converted = [self._TaskHandPoints(points) for points in result.landmarks]
             if converted:
                 self._last_landmarks = converted
@@ -168,7 +188,7 @@ class HandTracker:
             self._recover_tasks_backend()
             return TrackingResult(landmarks=[])
 
-        rgb_frame = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
+        rgb_frame = cv2.cvtColor(detection_frame, cv2.COLOR_BGR2RGB)
         result = self._hands.process(rgb_frame)
         hand_landmarks = getattr(result, "multi_hand_landmarks", None)
         if hand_landmarks is None:
