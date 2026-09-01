@@ -2266,9 +2266,8 @@ class MainWindow(QMainWindow):
         self._execute_shortcut(shortcut)
         conf_str = f" ({confidence:.0%})" if is_saved_motion else ""
         self._log(f"{gesture_name}{conf_str}  →  {'+'.join(keys)}", "trigger")
-        if self._is_window_obscured():
-            toast_conf = f" ({confidence:.0%})" if is_saved_motion else ""
-            self._show_capture_toast(f"{gesture_name}{toast_conf} -> {'+'.join(keys)}")
+        toast_conf = f" ({confidence:.0%})" if is_saved_motion else ""
+        self._show_capture_toast(f"{gesture_name}{toast_conf} -> {'+'.join(keys)}")
         if self._dispatcher.last_error:
             self._log(f"Shortcut warning: {self._dispatcher.last_error}", "warn")
 

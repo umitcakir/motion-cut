@@ -32,6 +32,22 @@ if [ ! -f "$GESTURE_MODEL_FILE" ]; then
   curl -L "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task" -o "$GESTURE_MODEL_FILE"
 fi
 
+if [ "$(uname -s)" = "Linux" ]; then
+  if ! command -v playerctl >/dev/null 2>&1; then
+    echo "[motion-cut] playerctl not found. Attempting install..."
+    if command -v pacman >/dev/null 2>&1; then
+      sudo pacman -S --noconfirm playerctl
+    elif command -v apt >/dev/null 2>&1; then
+      sudo apt update
+      sudo apt install -y playerctl
+    elif command -v dnf >/dev/null 2>&1; then
+      sudo dnf install -y playerctl
+    else
+      echo "[motion-cut] No supported package manager found for automatic playerctl install."
+    fi
+  fi
+fi
+
 if [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
   if ! command -v ydotool >/dev/null 2>&1; then
     echo "[motion-cut] ydotool not found. Attempting install..."

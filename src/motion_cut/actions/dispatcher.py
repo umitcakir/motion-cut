@@ -17,6 +17,7 @@ class ActionDispatcher:
         self._keyboard = Controller()
         self._session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
         self._ydotool = shutil.which("ydotool")
+        self._playerctl = shutil.which("playerctl") if sys.platform.startswith("linux") else None
         self._last_error = ""
 
     def trigger_shortcut(self, keys: Iterable[str]) -> None:
@@ -27,6 +28,9 @@ class ActionDispatcher:
         self._last_error = ""
         if len(normalized) == 1 and normalized[0] in self._NAMED_ACTIONS:
             self._trigger_named_action(normalized[0])
+            return
+
+        if normalized == ["playpause"] and self._trigger_playing_mpris_player():
             return
 
         if self._session_type == "wayland" and self._ydotool:
@@ -114,6 +118,48 @@ class ActionDispatcher:
         result = subprocess.run(command, check=False, capture_output=True, text=True)
         if result.returncode != 0:
             self._last_error = result.stderr.strip() or "ydotool key injection failed"
+
+    def _trigger_playing_mpris_player(self) -> bool:
+        """Toggle the player that is actually playing, when MPRIS is available."""
+        playerctl = getattr(self, "_playerctl", None)
+        if not playerctl:
+            return False
+
+        players = self._run_playerctl(playerctl, "-l")
+        if players is None:
+            return False
+        if players.returncode != 0:
+            return False
+
+        for player in players.stdout.splitlines():
+            player = player.strip()
+            if not player:
+                continue
+            status = self._run_playerctl(playerctl, "-p", player, "status")
+            if status is None:
+                continue
+            if status.returncode == 0 and status.stdout.strip().lower() == "playing":
+                result = self._run_playerctl(playerctl, "-p", player, "play-pause")
+                if result is None:
+                    return True
+                if result.returncode != 0:
+                    self._last_error = result.stderr.strip() or "MPRIS play/pause failed"
+                return True
+
+        return False
+
+    @staticmethod
+    def _run_playerctl(playerctl: str, *arguments: str):
+        try:
+            return subprocess.run(
+                [playerctl, *arguments],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=0.25,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
 
     @staticmethod
     def _to_key(value: str):

@@ -43,6 +43,32 @@ def _make_hand_landmarks(pose: np.ndarray):
 
 
 class SequenceGestureMatcherTests(unittest.TestCase):
+    def test_play_pause_targets_the_player_that_is_playing(self) -> None:
+        dispatcher = ActionDispatcher.__new__(ActionDispatcher)
+        dispatcher._playerctl = "/usr/bin/playerctl"
+        dispatcher._session_type = "wayland"
+        dispatcher._ydotool = None
+        dispatcher._last_error = ""
+
+        def run(command, **_kwargs):
+            if command[-1] == "-l":
+                return Mock(returncode=0, stdout="youtube\nspotify\n", stderr="")
+            if command[-1] == "status":
+                player = command[command.index("-p") + 1]
+                status = "Paused\n" if player == "youtube" else "Playing\n"
+                return Mock(returncode=0, stdout=status, stderr="")
+            return Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch(
+            "motion_cut.actions.dispatcher.subprocess.run", side_effect=run
+        ) as run_mock:
+            dispatcher.trigger_shortcut(["playpause"])
+
+        self.assertEqual(
+            run_mock.call_args_list[-1].args[0],
+            ["/usr/bin/playerctl", "-p", "spotify", "play-pause"],
+        )
+
     def test_screenshot_action_uses_the_macos_shortcut(self) -> None:
         dispatcher = ActionDispatcher.__new__(ActionDispatcher)
         dispatcher.trigger_shortcut = Mock()

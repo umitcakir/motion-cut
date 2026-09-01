@@ -61,7 +61,7 @@ Use gestures with clearly different start and end poses. Stable lighting, a plai
 
 - **macOS:** Enable Motion Cut under **System Settings > Privacy & Security > Camera**. To send shortcuts to other apps, also enable it under **Accessibility**. macOS builds are unsigned, so Gatekeeper may require Control-click > Open on first launch.
 - **Windows:** Allow camera access in **Settings > Privacy & security > Camera**. Windows SmartScreen may warn about an unsigned executable.
-- **Linux:** On Wayland, global shortcut injection may need `ydotool`. The source launcher attempts setup when a supported package manager is available; otherwise Motion Cut falls back to `pynput`, which may not control other apps.
+- **Linux:** The Play / Pause action uses `playerctl` to target the player that is currently playing, so a paused browser tab does not steal actions from Spotify or another active player. The source launcher attempts to install `playerctl` and, on Wayland, `ydotool` when a supported package manager is available. Without `playerctl`, Play / Pause falls back to the desktop's global media-key routing.
 
 ## Data And Privacy
 

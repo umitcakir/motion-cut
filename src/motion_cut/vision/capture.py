@@ -93,6 +93,10 @@ class CameraStream:
     def __init__(self, config: CameraConfig) -> None:
         self._config = config
         self._cap: cv2.VideoCapture | None = None
+        self._latest_frame = None
+        self._frame_lock = threading.Lock()
+        self._reader_stop = threading.Event()
+        self._reader_thread: threading.Thread | None = None
         self.last_error_message = ""
         self.last_active_device_index: int | None = None
 
@@ -131,6 +135,14 @@ class CameraStream:
                 continue
 
             self._cap = cap
+            self._latest_frame = cv2.flip(frame, 1)
+            self._reader_stop.clear()
+            self._reader_thread = threading.Thread(
+                target=self._read_latest_frame,
+                name="motion-cut-camera",
+                daemon=True,
+            )
+            self._reader_thread.start()
             self.last_error_message = ""
             self.last_active_device_index = index
             return
@@ -177,9 +189,16 @@ class CameraStream:
         return ordered
 
     def close(self) -> None:
+        self._reader_stop.set()
+        reader = self._reader_thread
+        if reader is not None and reader is not threading.current_thread():
+            reader.join(timeout=1.0)
+        self._reader_thread = None
         if self._cap is not None:
             self._cap.release()
             self._cap = None
+        with self._frame_lock:
+            self._latest_frame = None
 
     def __enter__(self) -> "CameraStream":
         self.open()
@@ -192,9 +211,19 @@ class CameraStream:
         if self._cap is None:
             raise RuntimeError("CameraStream is not initialized")
 
-        ok, frame = self._cap.read()
-        if not ok:
-            return None
+        with self._frame_lock:
+            return self._latest_frame
 
-        frame = cv2.flip(frame, 1)
-        return frame
+    def _read_latest_frame(self) -> None:
+        cap = self._cap
+        if cap is None:
+            return
+
+        while not self._reader_stop.is_set():
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+
+            frame = cv2.flip(frame, 1)
+            with self._frame_lock:
+                self._latest_frame = frame
